@@ -26,6 +26,7 @@
 #include <vector>
 
 #include <vulkan/vulkan.h> // also assume core+WSI commands are loaded
+#include <vulkan/vulkan_core.h>
 static_assert( VK_HEADER_VERSION >= REQUIRED_HEADER_VERSION, "Update your SDK! This app is written against Vulkan header version " STRINGIZE(REQUIRED_HEADER_VERSION) "." );
 
 #include "EnumerateScheme.h"
@@ -136,7 +137,8 @@ VkImage initImage(
 	VkFormat format,
 	uint32_t width, uint32_t height,
 	VkSampleCountFlagBits samples,
-	VkImageUsageFlags usage
+	VkImageUsageFlags usage,
+	VkImageTiling tiling
 );
 void killImage( VkDevice device, VkImage image );
 
@@ -353,6 +355,22 @@ int helloTriangle() try{
 	VkShaderModule vertexShader = initShaderModule( device, vertexShaderBinary );
 	VkShaderModule fragmentShader = initShaderModule( device, fragmentShaderBinary );
 	VkPipelineLayout pipelineLayout = initPipelineLayout( device );
+
+	VkImage testImage = 
+		initImage(device, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 
+				  VK_SAMPLE_COUNT_1_BIT, 
+				  VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+				  VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+				  VK_IMAGE_USAGE_SAMPLED_BIT, 
+				  VK_IMAGE_TILING_LINEAR);
+	VkDeviceMemory testImageMemory = initMemory<ResourceType::Image>(
+		device,
+		physicalDeviceMemoryProperties,
+		testImage,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+	);
+	setMemoryData(device, testImageMemory, nullptr, 0);
 
 	VkBuffer vertexBuffer = initBuffer( device, sizeof( decltype( triangle )::value_type ) * triangle.size(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT );
 	VkDeviceMemory vertexBufferMemory = initMemory<ResourceType::Buffer>(
@@ -961,6 +979,7 @@ template<>
 VkMemoryRequirements getMemoryRequirements< ResourceType::Buffer >( VkDevice device, VkBuffer buffer ){
 	VkMemoryRequirements memoryRequirements;
 	vkGetBufferMemoryRequirements( device, buffer, &memoryRequirements );
+	fprintf(stderr, "buffer reqs: align = %d\n", memoryRequirements.alignment);
 
 	return memoryRequirements;
 }
@@ -969,6 +988,7 @@ template<>
 VkMemoryRequirements getMemoryRequirements< ResourceType::Image >( VkDevice device, VkImage image ){
 	VkMemoryRequirements memoryRequirements;
 	vkGetImageMemoryRequirements( device, image, &memoryRequirements );
+	fprintf(stderr, "image reqs: align = %d\n", memoryRequirements.alignment);
 
 	return memoryRequirements;
 }
@@ -1035,6 +1055,7 @@ VkDeviceMemory initMemory(
 void setMemoryData( VkDevice device, VkDeviceMemory memory, void* begin, size_t size ){
 	void* data;
 	VkResult errorCode = vkMapMemory( device, memory, 0 /*offset*/, VK_WHOLE_SIZE, 0 /*flags - reserved*/, &data ); RESULT_HANDLER( errorCode, "vkMapMemory" );
+	fprintf(stderr, "map result : data = %p\n", data);
 	memcpy( data, begin, size );
 	vkUnmapMemory( device, memory );
 }
@@ -1065,7 +1086,7 @@ void killBuffer( VkDevice device, VkBuffer buffer ){
 	vkDestroyBuffer( device, buffer, nullptr );
 }
 
-VkImage initImage( VkDevice device, VkFormat format, uint32_t width, uint32_t height, VkSampleCountFlagBits samples, VkImageUsageFlags usage ){
+VkImage initImage( VkDevice device, VkFormat format, uint32_t width, uint32_t height, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VkImageTiling tiling){
 	VkExtent3D size{
 		width,
 		height,
@@ -1082,7 +1103,7 @@ VkImage initImage( VkDevice device, VkFormat format, uint32_t width, uint32_t he
 		1, // mipLevels
 		1, // arrayLayers
 		samples,
-		VK_IMAGE_TILING_OPTIMAL,
+		tiling,
 		usage,
 		VK_SHARING_MODE_EXCLUSIVE,
 		0, // queueFamilyIndexCount -- ignored for EXCLUSIVE
@@ -1725,7 +1746,9 @@ void killPipeline( VkDevice device, VkPipeline pipeline ){
 
 void setVertexData( VkDevice device, VkDeviceMemory memory, vector<Vertex2D_ColorF_pack> vertices ){
 	TODO( "Should be in Device Local memory instead" )
-	setMemoryData(  device, memory, vertices.data(), sizeof( decltype(vertices)::value_type ) * vertices.size()  );
+	for (int i = 0; i < 10; i++) {
+		setMemoryData(  device, memory, vertices.data(), sizeof( decltype(vertices)::value_type ) * vertices.size()  );
+	}
 }
 
 VkSemaphore initSemaphore( VkDevice device ){
